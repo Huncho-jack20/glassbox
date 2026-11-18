@@ -234,9 +234,144 @@ Monitored by `internal/apicompat` (symbol-level) and `scripts/api-snapshot.sh`
 
 ---
 
-## 7. Updating this matrix
+## 9. SBOM diff interpretation
 
-This matrix must be updated in the same PR as any change to a listed surface.
+The `scripts/sbom-diff.sh` script compares two SPDX 2.3 JSON SBOMs and
+produces a reviewable supply-chain diff. Not every diff signals a vulnerability
+or a policy violation — many diffs are routine dependency bumps or
+metadata-only changes. This section shows what to inspect first.
+
+### Synthetic before/after example
+
+The following two SBOM snippets are sanitized fictional examples. They share
+one Go dependency (`pkg:golang/golang.org/x/net`) that received a version bump
+and one new npm dependency added. No real project data is represented.
+
+**`sbom-before.spdx.json`** (old):
+
+```json
+{
+  "spdxVersion": "SPDX-2.3",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "glassbox-v1.2.0",
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-golang-x-net",
+      "name": "golang.org/x/net",
+      "versionInfo": "v0.17.0",
+      "licenseDeclared": "BSD-3-Clause",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:golang/golang.org/x/net@v0.17.0"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**`sbom-after.spdx.json`** (new):
+
+```json
+{
+  "spdxVersion": "SPDX-2.3",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "glassbox-v1.3.0",
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-golang-x-net",
+      "name": "golang.org/x/net",
+      "versionInfo": "v0.23.0",
+      "licenseDeclared": "BSD-3-Clause",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:golang/golang.org/x/net@v0.23.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-npm-semver",
+      "name": "semver",
+      "versionInfo": "7.6.0",
+      "licenseDeclared": "ISC",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/semver@7.6.0"
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Running the diff
+
+```bash
+bash scripts/sbom-diff.sh sbom-before.spdx.json sbom-after.spdx.json
+```
+
+Expected output (text format):
+
+```
+SBOM diff
+  Old : sbom-before.spdx.json
+  New : sbom-after.spdx.json
+
+  Added:          1
+  Removed:        0
+  Version changes:1
+  License changes:0
+  Policy violations: 0
+
+  New components (1):
+    + semver 7.6.0 (npm) [ISC]
+
+  Version changes (1):
+    ~ golang.org/x/net (go): v0.17.0 -> v0.23.0
+
+  [PASS] SBOM diff clean — no policy violations.
+```
+
+### What to inspect first
+
+| Field in output | What it means | Action |
+|----------------|--------------|--------|
+| `Added` | New dependency not present in the old SBOM | Verify PURL, license, and ecosystem; check the diff is intentional |
+| `Removed` | Dependency present in the old SBOM but not the new one | Confirm it was deliberately dropped, not accidentally de-listed |
+| `Version changes` | Same PURL name, different version — the PURL itself changed so the diff also shows it as an add+remove pair internally | Review the version delta for known CVEs |
+| `License changes` | Same name and version, different `licenseDeclared` field | A metadata-only update; verify the new license is policy-compliant |
+| `Policy violations` | License appears in `license-policy.json` `disallowed_licenses` list | Requires resolution before merge — do not ship |
+
+### Reproducing with the existing script
+
+```bash
+# Generate an SBOM for the current build (requires syft or the generate-sbom.sh script)
+bash scripts/generate-sbom.sh --output sbom-current.spdx.json
+
+# Compare against a previously saved baseline
+bash scripts/sbom-diff.sh sbom-baseline.spdx.json sbom-current.spdx.json \
+  --policy license-policy.json \
+  --format markdown \
+  --output reports/sbom-diff.json
+```
+
+A diff that shows only `Version changes` and no `Policy violations` is routine.
+A diff that shows `Added` components or `License changes` warrants review before
+the release is published.
+
+> **Note:** The script does not modify, regenerate, or validate the SBOM files
+> themselves. It only reads them. SBOM generation behaviour is unchanged by
+> running this command.
+
+---
+
+## 7. Updating this matrix
 The release checklist in `docs/command-development-guide.md` requires it.
 
 Steps:

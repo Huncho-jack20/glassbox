@@ -97,6 +97,39 @@ You only need **bash**, **python3**, and optionally the
 [`cryptography`](https://pypi.org/project/cryptography/) Python package for
 the Ed25519 signature step.
 
+### Prerequisites
+
+Hash verification (steps 1–4 of the script) needs only tools that ship with
+every mainstream operating system:
+
+| Tool | Purpose | Pre-installed on |
+|------|---------|-----------------|
+| `bash` 3.2+ | Run the verification script | Linux, macOS, WSL |
+| `sha256sum` or `shasum` | Compute artifact hashes | Linux (`sha256sum`), macOS (`shasum -a 256`) |
+| `python3` | Parse `manifest.json` | Linux, macOS, most CI images |
+| `curl` | Download release files | Linux, macOS, Windows (PowerShell alias) |
+
+Ed25519 signature verification (step 5) requires **one** of the following.
+Both are optional — all hash checks still run when neither is available:
+
+| Option | Install command | Notes |
+|--------|----------------|-------|
+| Python `cryptography` package | `pip install cryptography` | Preferred; cross-platform |
+| `openssl` 3.0+ | pre-installed on most Linux; `brew install openssl@3` on macOS | Script falls back to this automatically |
+
+### Hash verification vs signature verification
+
+These two steps protect against different threats and must not be conflated:
+
+| Step | What it checks | Threat it catches |
+|------|---------------|-------------------|
+| **SHA-256 per artifact** (step 3) | Each downloaded file matches the hash recorded in `manifest.json` | File corrupted in transit or silently replaced on the CDN after signing |
+| **Ed25519 signature** (step 5) | `manifest.json` itself was signed by the CI private key and has not been altered since | The manifest was tampered with after CI produced it |
+
+The SHA-256 checks can only be as trustworthy as the manifest file they read
+from. The Ed25519 signature is what proves the manifest came from CI and was
+not modified afterward. Run both steps for a complete verification.
+
 ### Quick start
 
 ```bash

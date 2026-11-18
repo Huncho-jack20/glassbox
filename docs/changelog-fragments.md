@@ -83,6 +83,55 @@ categories (e.g. a CLI flag change that is also a breaking change), use
 
 ---
 
+## Example fragment
+
+The file below is a minimal valid fragment that passes all validation rules.
+Use it as a copy-paste starting point. The PR number `9999` and all content
+are fictional.
+
+**File:** `changelog/fragments/9999-add-export-timeout-flag.toml`
+
+```toml
+category = "cli"
+pr = 9999
+summary = "added --export-timeout flag to debug for capping trace export duration"
+details = "Prevents debug from hanging indefinitely when an RPC export endpoint is unresponsive. Defaults to 30 s; set to 0 to disable. See docs/trace-export-annotations.md."
+breaking = false
+migration_note = ""
+affects = ["cli-flags"]
+```
+
+**Validation command:**
+
+```bash
+# Validate a single fragment (from the repo root)
+bash scripts/validate-fragments.sh changelog/fragments/9999-add-export-timeout-flag.toml
+
+# Validate the full pending set
+make changelog-check
+```
+
+Expected output for a valid fragment:
+
+```
+[OK]  9999-add-export-timeout-flag.toml
+
+All fragments valid.
+```
+
+**Why this example passes:**
+
+| Rule | Value in example | Result |
+|------|-----------------|--------|
+| Required fields present | all five present | pass |
+| `category` | `cli` | pass — in allowed set |
+| `pr` | `9999` | pass — positive integer, no duplicate |
+| `summary` length | 69 chars | pass — under 120 |
+| `breaking = true` → `migration_note` | `breaking = false` | not applicable |
+| `affects` values | `cli-flags` | pass — recognised surface |
+
+---
+
 ## Validation rules
 
 `make changelog-check` (and CI on every PR) enforces:

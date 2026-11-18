@@ -189,6 +189,75 @@ trigger. It:
 
 ## Troubleshooting
 
+### Triage sequence: separating timestamp, ordering, and content differences
+
+A reproducibility failure can come from three distinct sources.
+Work through them in order — each test takes seconds and rules out a whole
+class of causes without installing additional tools.
+
+**Step 1 — Compare checksums first.**
+
+```bash
+# Preserve both build directories from the last run
+KEEP_BUILD_DIRS=1 bash scripts/check-reproducibility.sh linux-amd64
+# The script prints the two temp dir paths.
+```
+
+| Which hashes differ? | Most likely cause |
+|----------------------|-------------------|
+| Binary identical, archive differs | Archive metadata (mtime, owner, sort order) |
+| Binary differs, archive also differs | Build-time non-determinism in the binary |
+| Both identical | Builds are reproducible — no action needed |
+
+**Step 2 — Isolate archive metadata.**
+
+If the binary hashes match but the archive hashes differ, the issue is in how
+`tar` or `zip` assembles the file — not in the Go compiler output. Run the
+comparison on extracted contents to confirm:
+
+```bash
+# Extract both archives into separate directories and compare the binaries inside
+mkdir /tmp/arc1 /tmp/arc2
+tar -xzf /tmp/tmp.XXXXX/glassbox-linux-amd64.tar.gz -C /tmp/arc1
+tar -xzf /tmp/tmp.YYYYY/glassbox-linux-amd64.tar.gz -C /tmp/arc2
+sha256sum /tmp/arc1/glassbox-linux-amd64 /tmp/arc2/glassbox-linux-amd64
+```
+
+If these SHA-256 values match, the binaries inside are identical and only the
+archive wrapper differs. See [Archive hashes differ but binary hashes match](#archive-hashes-differ-but-binary-hashes-match) below for the specific flags to check.
+
+**Step 3 — Inspect archive metadata directly (optional, requires `python3`).**
+
+`python3` is pre-installed on most Linux and macOS systems and does not require
+additional packages:
+
+```bash
+python3 - /tmp/tmp.XXXXX/glassbox-linux-amd64.tar.gz <<'EOF'
+import tarfile, sys
+with tarfile.open(sys.argv[1]) as tf:
+    for m in tf.getmembers():
+        print(f"name={m.name}  mtime={m.mtime}  uid={m.uid}  gid={m.gid}  uname={m.uname}  gname={m.gname}")
+EOF
+```
+
+Run the same command on the second archive and diff the output. Any line that
+differs identifies the metadata field causing the mismatch.
+
+**Step 4 — Deep binary analysis (optional, requires `diffoscope`).**
+
+`diffoscope` is a third-party tool. Install it only when the binary hashes
+already differ and you need section-level detail:
+
+```bash
+# Install (optional — not required for most investigations)
+pip install diffoscope   # or: apt install diffoscope
+
+KEEP_BUILD_DIRS=1 bash scripts/check-reproducibility.sh linux-amd64
+diffoscope /tmp/tmp.XXXXX/glassbox-linux-amd64 /tmp/tmp.YYYYY/glassbox-linux-amd64
+```
+
+---
+
 ### Binary hashes differ
 
 Work through this checklist:
@@ -230,19 +299,6 @@ Work through this checklist:
    Always use `--owner=0 --group=0 --numeric-owner`.
 
 4. **`zip` extra fields** — Use `zip -X` to strip metadata.
-
-### Using diffoscope for detailed analysis
-
-```bash
-# Install
-pip install diffoscope   # or: apt install diffoscope
-
-# Run with KEEP_BUILD_DIRS=1 to preserve temp directories
-KEEP_BUILD_DIRS=1 bash scripts/check-reproducibility.sh linux-amd64
-
-# Script prints the temp dir paths; then:
-diffoscope /tmp/tmp.XXXXX/glassbox-linux-amd64 /tmp/tmp.YYYYY/glassbox-linux-amd64
-```
 
 `diffoscope` will recursively disassemble the ELF binary and show exactly which
 section differs and why.
